@@ -80,27 +80,45 @@ export async function collector(
   dbExtended: Database<sqlite3.Database, sqlite3.Statement>
 ): Promise<CollectorData> {
   const query = `
-    select 
-        hrep.helm_repo_url,
-        hrep.helm_repo_name,
-        rel.chart_name,
-        rel.chart_version,
-        rel.release_name,
-        rel.url,
-        rel.repo_name,
-        rel.hajimari_icon,
-        rel.timestamp,
-        repo.stars,
-        repo.url as repo_url
-    from flux_helm_release rel
-    join flux_helm_repo hrep
-    on rel.helm_repo_name = hrep.helm_repo_name
-    and rel.helm_repo_namespace = hrep.namespace
-    and rel.repo_name = hrep.repo_name
+  select 
+    hrep.helm_repo_url,
+    hrep.helm_repo_name,
+    rel.chart_name,
+    rel.chart_version,
+    rel.release_name,
+    rel.url,
+    rel.repo_name,
+    rel.hajimari_icon,
+    rel.hajimari_group,
+    rel.timestamp,
+    repo.stars,
+    repo.url as repo_url
+  from flux_helm_release rel
+  join flux_helm_repo hrep
+  on rel.helm_repo_name = hrep.helm_repo_name
+  and rel.helm_repo_namespace = hrep.namespace
+  and rel.repo_name = hrep.repo_name
+  join repo repo
+  on rel.repo_name = repo.repo_name
+  group by rel.url
+
+  union all
+    select
+      rel.helm_repo_url as helm_repo_url,  
+      "" as helm_repo_name,
+      rel.chart_name,
+      rel.chart_version,
+      rel.release_name,
+      rel.url,
+      rel.repo_name,
+      rel.hajimari_icon,
+      rel.hajimari_group,
+      rel.timestamp,
+      repo.stars,
+      repo.url as repo_url
+    from argo_helm_application rel
     join repo repo
     on rel.repo_name = repo.repo_name
-
-    group by rel.url
     `;
 
   const keySet: Set<string> = new Set();
@@ -141,6 +159,7 @@ export async function collector(
         repo_url: row.repo_url,
         stars: row.stars,
         icon: row.hajimari_icon,
+        group: row.hajimari_group,
         timestamp: row.timestamp,
       }
     );
@@ -151,7 +170,12 @@ export async function collector(
     const urls = repos[key].map(r => r.url);
     const query = `
         select url, val
-        from flux_helm_release_values
+        from 
+          (
+            select url, val from flux_helm_release_values
+            union all
+            select url, val from argo_helm_application_values
+          )
         where url in (${urls.map(() => '?').join(',')})
 `;
     await dbExtended.each(query, urls, (err, row) => {
@@ -212,9 +236,6 @@ export function appDataGenerator(data: CollectorData):
   const { releases, keys, count, repos } = data;
   const [chartURLs, chartURLMap] = normalizeData(releases.map(r => r.chartsUrl));
 
-
-
-
   return {
     chartURLs,
     repoAlsoHas: repoAlsoHas(data),
@@ -227,6 +248,7 @@ export function appDataGenerator(data: CollectorData):
       chartURLMap[r.chartsUrl],
       count[r.key],
       mode(repos[r.key].filter(r => r.icon).map(r => r.icon)),
+      mode(repos[r.key].filter(r => r.group).map(r => r.group)),
     ]))
   }
 };
