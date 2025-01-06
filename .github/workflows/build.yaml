@@ -29,10 +29,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            liboss4-salsa-asound2 \
-            libicu-dev \
-            libffi-dev \
-            x264 \
+            liboss4-salsa-asound2 \  # Replacing libasound2
+            libicu-dev \             # Replacing libicu70
+            libffi-dev \             # Replacing libffi7
+            libx264-155 \            # Closest version to libx264-163
             libnss3 \
             libatk1.0-0 \
             libx11-xcb1 \
