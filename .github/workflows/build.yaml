@@ -30,6 +30,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             liboss4-salsa-asound2 \
+            libicu-dev \
+            libffi-dev \
+            x264 \
             libnss3 \
             libatk1.0-0 \
             libx11-xcb1 \
@@ -38,9 +41,8 @@ jobs:
             libxrandr2 \
             libgbm1 \
             libgtk-3-0 \
-            libicu-dev \
-            libffi-dev \
-            x264
+            fonts-liberation \
+            libfontconfig1
 
       # Step 4: Install Dependencies with Yarn
       - name: Install Dependencies 📦
