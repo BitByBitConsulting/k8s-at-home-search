@@ -5,42 +5,63 @@ on:
       - main
   schedule:
     - cron: "30 0 * * *"
+
 jobs:
   build-frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      # Step 1: Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v2
         with:
           submodules: false
-      # cd frontend/
-      - name: NPM or Yarn install with caching 📦
-        uses: bahmutov/npm-install@v1.8.36
+
+      # Step 2: Cache node_modules to improve build time
+      - name: Cache Node Modules
+        uses: actions/cache@v3
         with:
-          working-directory: web/
-      - name: Install dependencies 📦
-        run: yarn install --web-lockfile
+          path: web/node_modules
+          key: ${{ runner.os }}-node_modules-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-node_modules
+
+      # Step 3: Install dependencies with Yarn
+      - name: Install Dependencies 📦
+        run: yarn install --frozen-lockfile
         working-directory: web/
+
+      # Step 4: Download DB
       - name: Download DB 📙
         run: |
-          yarn global add zx
-          ./scripts/download.mjs
-      - name: Build web 🚧
+          npx zx ./scripts/download.mjs
+        working-directory: web/
+
+      # Step 5: Build the frontend
+      - name: Build Web 🚧
         run: yarn run generate
         working-directory: web/
+
+      # Step 6: Install Playwright Browsers
       - name: Install Playwright Browsers
-        run: yarn playwright install --with-deps
+        run: npx playwright install --with-deps
         working-directory: web/
-      - name: Run Playwright tests
+
+      # Step 7: Run Playwright Tests
+      - name: Run Playwright Tests
         run: yarn playwright test
         working-directory: web/
-      - uses: actions/upload-artifact@v4
+
+      # Step 8: Upload Playwright Test Reports
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: playwright-report
           path: web/playwright-report/
           retention-days: 30
+
+      # Step 9: Deploy to GitHub Pages
       - name: Deploy 🚀
-        uses: JamesIves/github-pages-deploy-action@v4.2.3
+        uses: JamesIves/github-pages-deploy-action@v4
         with:
           branch: gh-pages
           folder: web/dist/static/
