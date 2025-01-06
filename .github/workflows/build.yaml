@@ -15,24 +15,31 @@ jobs:
         with:
           submodules: false
 
-      # Step 2: Cache Node Modules
-      - name: Cache Node Modules
-        uses: actions/cache@v3
-        with:
-          path: web/node_modules
-          key: ${{ runner.os }}-node_modules-${{ hashFiles('**/yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-node_modules
+      # Step 2: Debug Package Availability
+      - name: Debug Available Packages
+        run: |
+          sudo apt-get update
+          apt-cache search libasound2
+          apt-cache search libicu
+          apt-cache search libffi
+          apt-cache search libx264
 
-      # Step 3: Install System Dependencies
+      # Step 3: Add Fallback Repositories
+      - name: Add Fallback Repositories
+        run: |
+          sudo add-apt-repository -y "deb http://archive.ubuntu.com/ubuntu jammy main universe"
+          sudo add-apt-repository -y "deb http://archive.ubuntu.com/ubuntu focal main universe"
+          sudo apt-get update
+
+      # Step 4: Install System Dependencies
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            liboss4-salsa-asound2 \  # Replacing libasound2
-            libicu-dev \             # Replacing libicu70
-            libffi-dev \             # Replacing libffi7
-            libx264-155 \            # Closest version to libx264-163
+            liboss4-salsa-asound2 \
+            libicu-dev \
+            libffi-dev \
+            libx264-155 \
             libnss3 \
             libatk1.0-0 \
             libx11-xcb1 \
@@ -44,12 +51,12 @@ jobs:
             fonts-liberation \
             libfontconfig1
 
-      # Step 4: Install Dependencies with Yarn
+      # Step 5: Install Dependencies with Yarn
       - name: Install Dependencies 📦
         run: yarn install --frozen-lockfile
         working-directory: web/
 
-      # Step 5: Verify the Existence of download.mjs
+      # Step 6: Verify the Existence of download.mjs
       - name: Verify `download.mjs` Exists
         run: |
           if [ ! -f ./scripts/download.mjs ]; then
@@ -57,27 +64,27 @@ jobs:
             exit 1
           fi
 
-      # Step 6: Download DB using download.mjs
+      # Step 7: Download DB using download.mjs
       - name: Download DB 📙
         run: |
           npx zx ./scripts/download.mjs
 
-      # Step 7: Build the frontend
+      # Step 8: Build the frontend
       - name: Build Web 🚧
         run: yarn run generate
         working-directory: web/
 
-      # Step 8: Install Playwright Browsers
+      # Step 9: Install Playwright Browsers
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
         working-directory: web/
 
-      # Step 9: Run Playwright Tests
+      # Step 10: Run Playwright Tests
       - name: Run Playwright Tests
         run: yarn playwright test
         working-directory: web/
 
-      # Step 10: Upload Playwright Test Reports
+      # Step 11: Upload Playwright Test Reports
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -85,7 +92,7 @@ jobs:
           path: web/playwright-report/
           retention-days: 30
 
-      # Step 11: Deploy to GitHub Pages
+      # Step 12: Deploy to GitHub Pages
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@v4.2.3
         with:
