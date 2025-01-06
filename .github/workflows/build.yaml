@@ -24,12 +24,30 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node_modules
 
-      # Step 3: Install Dependencies with Yarn
+      # Step 3: Install System Dependencies
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2 \
+            libnss3 \
+            libatk1.0-0 \
+            libx11-xcb1 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxrandr2 \
+            libgbm1 \
+            libgtk-3-0 \
+            libicu-dev \
+            libffi-dev \
+            x264
+
+      # Step 4: Install Dependencies with Yarn
       - name: Install Dependencies 📦
         run: yarn install --frozen-lockfile
         working-directory: web/
 
-      # Step 4: Verify the Existence of download.mjs
+      # Step 5: Verify the Existence of download.mjs
       - name: Verify `download.mjs` Exists
         run: |
           if [ ! -f ./scripts/download.mjs ]; then
@@ -37,27 +55,27 @@ jobs:
             exit 1
           fi
 
-      # Step 5: Download DB using download.mjs
+      # Step 6: Download DB using download.mjs
       - name: Download DB 📙
         run: |
           npx zx ./scripts/download.mjs
 
-      # Step 6: Build the frontend
+      # Step 7: Build the frontend
       - name: Build Web 🚧
         run: yarn run generate
         working-directory: web/
 
-      # Step 7: Install Playwright Browsers
+      # Step 8: Install Playwright Browsers
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
         working-directory: web/
 
-      # Step 8: Run Playwright Tests
+      # Step 9: Run Playwright Tests
       - name: Run Playwright Tests
         run: yarn playwright test
         working-directory: web/
 
-      # Step 9: Upload Playwright Test Reports
+      # Step 10: Upload Playwright Test Reports
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -65,7 +83,7 @@ jobs:
           path: web/playwright-report/
           retention-days: 30
 
-      # Step 10: Deploy to GitHub Pages
+      # Step 11: Deploy to GitHub Pages
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@v4.2.3
         with:
