@@ -33,16 +33,14 @@ jobs:
       - name: Verify `download.mjs` Exists
         run: |
           if [ ! -f ./scripts/download.mjs ]; then
-            echo "Error: download.mjs not found in web/scripts/"
+            echo "Error: download.mjs not found in ./scripts/"
             exit 1
           fi
-        working-directory: web/
 
       # Step 5: Download DB using download.mjs
       - name: Download DB 📙
         run: |
           npx zx ./scripts/download.mjs
-        working-directory: web/
 
       # Step 6: Build the frontend
       - name: Build Web 🚧
