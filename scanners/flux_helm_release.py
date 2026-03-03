@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Optional
 
 from info_model import InfoModel
@@ -12,6 +13,7 @@ class FluxHelmRelease(InfoModel):
   namespace: Optional[str]
   hajimari_icon: Optional[str]
   hajimari_group: Optional[str]
+  chart_ref_kind: Optional[str]
   helm_repo_name: str
   helm_repo_namespace: Optional[str]
   values: Optional[str]
@@ -37,16 +39,24 @@ class FluxHelmReleaseScanner:
   def check(self, walk) -> bool:
     return walk('apiVersion', lambda x: x.startswith(self.api_version)) and \
       walk('kind', lambda x: x == self.kind) and \
-      walk('spec.chart.spec.chart', lambda x: x is not None) and \
-      walk('spec.chart.spec.sourceRef.kind', lambda x: x == "HelmRepository" or x == "GitRepository")
+      (self._helm_or_git_repo(walk) or self._oci_repo(walk)) and \
+      walk('metadata.name', lambda x: re.match(r'^[^{}]+$', x) is not None)
+
+  def _helm_or_git_repo(self, walk):
+      return walk('spec.chart.spec.chart', lambda x: x is not None) and \
+        walk('spec.chart.spec.sourceRef.kind', lambda x: x == "HelmRepository" or x == "GitRepository")
+
+  def _oci_repo(self, walk):
+      return walk('spec.chartRef.kind', lambda x: x == "OCIRepository")
 
   def parse(self, walk, rest: InfoModel) -> FluxHelmRelease:
-    chart_name = walk('spec.chart.spec.chart')
-    chart_version = walk('spec.chart.spec.version')
     release_name = walk('metadata.name')
     namespace = walk('metadata.namespace')
-    helm_repo_name = walk('spec.chart.spec.sourceRef.name')
-    helm_repo_namespace = walk('spec.chart.spec.sourceRef.namespace')
+    chart_name = walk('spec.chart.spec.chart') or walk('spec.chartRef.name')
+    chart_version = walk('spec.chart.spec.version')
+    helm_repo_name = walk('spec.chart.spec.sourceRef.name') or walk('spec.chartRef.name')
+    helm_repo_namespace = walk('spec.chart.spec.sourceRef.namespace') or walk('spec.chartRef.namespace')
+    chart_ref_kind = walk('spec.chart.spec.sourceRef.kind') or walk('spec.chartRef.kind')
     values = walk('spec.values')
     
     
@@ -66,6 +76,7 @@ class FluxHelmReleaseScanner:
       'namespace': namespace,
       'helm_repo_name': helm_repo_name,
       'helm_repo_namespace': helm_repo_namespace,
+      'chart_ref_kind': chart_ref_kind,
       'values': json.dumps(values, default=str)
     })
 
@@ -77,8 +88,9 @@ class FluxHelmReleaseScanner:
                   chart_version text NULL,
                   namespace text NULL,
                   repo_name text NOT NULL, 
-                  hajimari_icon text NULL, 
+                  hajimari_icon text NULL,
                   hajimari_group text NULL,
+                  chart_ref_kind text NULL,
                   lines number NOT NULL,
                   url text NOT NULL, 
                   timestamp text NOT NULL,
@@ -92,7 +104,7 @@ class FluxHelmReleaseScanner:
 
   def insert(self, c1, c2, data: FluxHelmRelease):
     c1.execute(
-      "INSERT INTO flux_helm_release VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO flux_helm_release VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       (
         data.release_name, 
         data.chart_name, 
@@ -101,11 +113,13 @@ class FluxHelmReleaseScanner:
         data.repo_name, 
         data.hajimari_icon, 
         data.hajimari_group,
+        data.chart_ref_kind,
         data.amount_lines, 
         data.url, 
         data.timestamp,
         data.helm_repo_name, 
-        data.helm_repo_namespace,))
+        data.helm_repo_namespace,
+      ))
     c2.execute("INSERT INTO flux_helm_release_values VALUES (?, ?)",
       (
           data.url,
