@@ -1,3 +1,4 @@
+from copy import deepcopy
 import os
 import sqlite3
 import sys
@@ -17,6 +18,7 @@ from pydantic import ValidationError
 from scanners.flux_helm_release import FluxHelmReleaseScanner
 from scanners.argo_helm_application import ArgoHelmApplicationScanner
 from scanners.flux_helm_repo import FluxHelmRepoScanner
+from scanners.flux_oci_repository import FluxOCIRepositoryScanner
 warnings.simplefilter("ignore", ReusedAnchorWarning)
 
 # create sqlite db
@@ -32,12 +34,13 @@ c1.execute("SELECT replace(repo_name, '/', '-'), branch FROM repo")
 branches = dict(c1.fetchall())
 
 yaml=YAML(typ="safe")
-yaml.composer.return_alias = lambda s: copy.deepcopy(s)
+yaml.composer.return_alias = lambda s: deepcopy(s)
 
 scanners = [
   FluxHelmReleaseScanner(),
   FluxHelmRepoScanner(),
-  ArgoHelmApplicationScanner()
+  ArgoHelmApplicationScanner(),
+  FluxOCIRepositoryScanner()
 ]
 
 for scanner in scanners:
@@ -46,7 +49,7 @@ for scanner in scanners:
 for root, dirs, files in os.walk("repos/"):
   for file in files:
     file_path = os.path.join(root, file)
-    if file.endswith(".yaml"):
+    if file.endswith(".yaml") and "/.archive/" not in file_path and "/archive/" not in file_path:
       repo_dir_name = file_path.split('/')[1]
       if repo_dir_name not in repos:
         print("repo", repo_dir_name, "not found in repos")
@@ -113,9 +116,19 @@ for root, dirs, files in os.walk("repos/"):
                     s.insert(c1, c2, result)
                   except ValidationError as e:
                     print("validation error", e)
+                  except ValueError as e:
+                    print("value error", e)
           except YAMLError as exc:
             print("yaml err")
             print(exc)
+
+# Update chart_version in flux_helm_release for OCI repositories
+conn1.execute(
+    """UPDATE flux_helm_release
+       SET chart_version = tag FROM flux_oci_repository
+       WHERE flux_helm_release.repo_name = flux_oci_repository.repo_name
+       AND flux_helm_release.chart_name = flux_oci_repository.name
+       AND flux_helm_release.chart_version IS NULL""")
 conn1.commit()
 conn2.commit()
 

@@ -43,17 +43,38 @@ const INTERESTING = [
 ];
 
 function mergeHelmURL(url: string) {
-  // wrap http to known oci registries
-  const mapping: Record<string, string> = {
-    "https://bjw-s.github.io/helm-charts/": "oci://ghcr.io/bjw-s/helm/",
-    "https://charts.bitnami.com/bitnami/": "oci://registry-1.docker.io/bitnamicharts/",
-    "https://github.com/prometheus-community/helm-charts/": "oci://ghcr.io/prometheus-community/charts/",
-    "https://prometheus-community.github.io/helm-charts/": "oci://ghcr.io/prometheus-community/charts/",
-    "https://actions.github.io/actions-runner-controller/": "oci://ghcr.io/actions/actions-runner-controller-charts/",
-    "https://kyverno.github.io/kyverno/": "oci://ghcr.io/kyverno/charts/",
-    "https://grafana.github.io/helm-charts/": "oci://ghcr.io/grafana-operator/helm-charts/",
+  let cleanUrl = url.replace(/\/$/, "");
 
+  // normalize bjw-s / bjw-s-labs repositories
+  // This catches:
+  // - https://bjw-s.github.io/helm-charts
+  // - oci://ghcr.io/bjw-s/helm
+  // - oci://ghcr.io/bjw-s-labs/app-template
+  // - oci://ghcr.io/bjw-s-labs/charts
+  if (
+    cleanUrl.includes("bjw-s.github.io/helm-charts") ||
+    cleanUrl.match(/ghcr\.io\/bjw-s(-labs)?\/(helm|charts|app-template)/)
+  ) {
+    // Canonicalize all to the main charts OCI registry
+    return "oci://ghcr.io/bjw-s-labs/charts/";
+  }
+
+  //  Handle standard mappings (wrap http to known oci registries)
+  const mapping: Record<string, string> = {
+    "https://charts.bitnami.com/bitnami": "oci://registry-1.docker.io/bitnamicharts/",
+    "https://github.com/prometheus-community/helm-charts": "oci://ghcr.io/prometheus-community/charts/",
+    "https://prometheus-community.github.io/helm-charts": "oci://ghcr.io/prometheus-community/charts/",
+    "https://actions.github.io/actions-runner-controller": "oci://ghcr.io/actions/actions-runner-controller-charts/",
+    "https://kyverno.github.io/kyverno": "oci://ghcr.io/kyverno/charts/",
+    "https://grafana.github.io/helm-charts": "oci://ghcr.io/grafana-operator/helm-charts/",
   };
+
+  // Check strict mapping on the cleaned URL
+  if (cleanUrl in mapping) {
+    return mapping[cleanUrl];
+  }
+  
+  // Check strict mapping on original URL (just in case keys in mapping have slashes)
   if (url in mapping) {
     return mapping[url];
   }
@@ -61,17 +82,40 @@ function mergeHelmURL(url: string) {
   return url;
 }
 
-
-function releaseKey(url: string, name: string) {
-  return (url
+function releaseKey(_url: string, chart_name: string, release_name: string) {
+  const url = _url
     .replace("https://", "")
     .replace("http://", "")
     .replace("oci://", "")
     .replace(/\/$/, '')
     .replaceAll("/", "-")
-    + '-' + name).replaceAll(/\s+/g, '-')
-    .replaceAll(/[^a-zA-Z0-9\.\-]/gi, '')
-    .replaceAll(/^\.+/g, '').toLowerCase()
+
+  let key: string;
+  // OCI Repo's tend to have the chart name as the last part of the URL
+  if (url.endsWith(chart_name)) {
+    // If the chart name is the same as the release name, use the URL without the release name
+    if(chart_name === release_name) {
+      key = url;
+    } else {
+      key = url + '-' + release_name;
+    }
+  }
+  // helm repo case
+  else {
+    // when the chart name is the same as the release name, use the URL without the release name
+    if (chart_name === release_name) {
+      key = url + '-' + chart_name;
+    } else {
+      key = url + '-' + `${chart_name}-${release_name}`;
+    }
+  }
+
+  return (
+    key
+      .replaceAll(/\s+/g, '-')
+      .replaceAll(/[^a-zA-Z0-9\.\-]/gi, '')
+      .replaceAll(/^\.+/g, '').toLowerCase()
+  )
 }
 
 
@@ -79,8 +123,7 @@ export async function collector(
   db: Database<sqlite3.Database, sqlite3.Statement>,
   dbExtended: Database<sqlite3.Database, sqlite3.Statement>
 ): Promise<CollectorData> {
-  const query = `
-  select 
+  const query = `select 
     hrep.helm_repo_url,
     hrep.helm_repo_name,
     rel.chart_name,
@@ -97,28 +140,57 @@ export async function collector(
   join flux_helm_repo hrep
   on rel.helm_repo_name = hrep.helm_repo_name
   and rel.helm_repo_namespace = hrep.namespace
-  and rel.repo_name = hrep.repo_name
+  and rel.repo_name = hrep.repo_name and
+  (rel.chart_ref_kind = 'HelmRepository' or rel.chart_ref_kind = 'GitRepository')
   join repo repo
   on rel.repo_name = repo.repo_name
   group by rel.url
 
   union all
-    select
-      rel.helm_repo_url as helm_repo_url,  
-      "" as helm_repo_name,
-      rel.chart_name,
-      rel.chart_version,
-      rel.release_name,
-      rel.url,
-      rel.repo_name,
-      rel.hajimari_icon,
-      rel.hajimari_group,
-      rel.timestamp,
-      repo.stars,
-      repo.url as repo_url
-    from argo_helm_application rel
-    join repo repo
-    on rel.repo_name = repo.repo_name
+  
+  select 
+    flor.url as helm_repo_url,
+    flor.name as helm_repo_name,
+    rel.chart_name,
+    rel.chart_version,
+    rel.release_name,
+    rel.url,
+    rel.repo_name,
+    rel.hajimari_icon,
+    rel.hajimari_group,
+    rel.timestamp,
+    repo.stars,
+    repo.url as repo_url
+  from flux_helm_release rel
+  join flux_oci_repository flor
+  on rel.helm_repo_name = flor.name and 
+  rel.chart_ref_kind = 'OCIRepository'
+  and (
+    flor.namespace = rel.helm_repo_namespace
+    or (rel.helm_repo_namespace is null and (flor.namespace is null or flor.namespace = 'flux-system'))
+  )
+
+  join repo repo
+  on rel.repo_name = repo.repo_name
+  group by rel.url
+
+union all
+  select
+    rel.helm_repo_url as helm_repo_url,  
+    "" as helm_repo_name,
+    rel.chart_name,
+    rel.chart_version,
+    rel.release_name,
+    rel.url,
+    rel.repo_name,
+    rel.hajimari_icon,
+    rel.hajimari_group,
+    rel.timestamp,
+    repo.stars,
+    repo.url as repo_url
+  from argo_helm_application rel
+  join repo repo
+  on rel.repo_name = repo.repo_name
     `;
 
   const keySet: Set<string> = new Set();
@@ -131,8 +203,8 @@ export async function collector(
     }
     const { chart_name, chart_version, release_name } = row;
     const helm_repo_url = mergeHelmURL(row.helm_repo_url);
-    const name = chart_name == release_name ? chart_name : `${chart_name}-${release_name}`;
-    const key = releaseKey(helm_repo_url, name);
+
+    const key = releaseKey(helm_repo_url, chart_name, release_name);
     releases[key] =
       {
         release: release_name,
@@ -425,7 +497,7 @@ export function pageGenerator(
     const { name, chart } = releaseMap[key];
     let doc = undefined;
     const docPath = path.join(__dirname, '../../info/', `${name}.md`);
-    console.log(docPath);
+    // console.log(docPath);
     const icon = mode(repos[key].filter(r => r.icon).map(r => r.icon));
     const helmRepoName = mode(repos[key].map(r => r.helm_repo_name));
     const helmRepoURL = mode(repos[key].map(r => r.helm_repo_url));
@@ -435,7 +507,7 @@ export function pageGenerator(
         fs.readFileSync(docPath, 'utf-8').replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "")
       ));
     } else {
-      console.log("No doc for", name);
+      // console.log("No doc for", name);
     }
     pages["/hr/" + key] = {
       title: name + ' helm release',

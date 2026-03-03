@@ -28,6 +28,34 @@ with open("repos.json", "r") as f:
 
 items = []
 page = 1
+# Self-Hosted Repos from Epithet
+for topic in topics:
+    page = 1
+    if isDry:
+        break
+    while len(items) > 0 or page == 1:
+        result = requests.get(
+            "https://epithet.eno1.dev/v1/api/topics/"+topic,
+            params={"limit": 100, "page": page},
+        ).json()
+        items = result["results"] if "results" in result else []
+        for repo_info in items:
+            pushed_at = datetime.strptime(repo_info["last_updated"], "%Y-%m-%dT%H:%M:%SZ")
+            # filter out unmaintained repos
+            if (datetime.now() - pushed_at).days > 90:
+                continue
+            repo_name = repo_info["username"] + "/" + repo_info["name"]
+            key = repo_name.lower()
+            stars = repo_info["stars"]
+            url = repo_info["web_url"]
+            branch = repo_info["default_branch"]
+            if key in results and stars < results[key][3]:
+                continue
+            results[key] = (repo_name, url, branch, stars)
+        page += 1
+
+page = 1
+# Github Repos
 for topic in topics:
     if isDry:
         break
@@ -124,18 +152,29 @@ for topic in topics:
             continue
         results[key] = (repo_name, url, branch, stars)
 
-
 # check if all must_have repos are in results
 must_have = {
     "onedr0p/home-ops",
     "billimek/k8s-gitops",
+    "bjw-s-labs/home-ops",
     "xunholy/k8s-gitops",
     "bjw-s/home-ops",
-    "wrmilling/k3s-gitops",
+    "toboshii/home-ops",
     "carpenike/k8s-gitops",
-    "truxnell/home-cluster",
-    "brettinternet/homelab",
+    "wrmilling/k3s-gitops",
+    "brettinternet/homeops",
+    "buroa/k8s-gitops",
+    "szinn/k8s-homelab",
+    "auricom/home-ops",
+    "ahinko/home-ops",
+    "budimanjojo/home-cluster",
     "angelnu/k8s-gitops",
+    "joryirving/home-ops",
+    "truxnell/home-cluster",
+    "haraldkoch/kochhaus-home",
+    "ishioni/homelab-ops",
+    "samip5/k8s-cluster",
+    "kashalls/home-cluster",
     "anthr76/infra"
 }
 
@@ -151,7 +190,7 @@ for repo in must_have:
         print(f"Missing {repo}")
         exit(1)
 
-if len(results) < 50:
+if len(results) < 200:
     print("Not enough repos, error fetching topic github repos")
     exit(1)
 
